@@ -1,0 +1,11 @@
+[package]
+name = "Searchly"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+walkdir = "2.3"      # Ordner rekursiv durchsuchen
+regex = "1.10"       # Textanalyse
+rayon = "1.7"        # Parallelisierung
+serde = { version = "1.0", features = ["derive"] }  # Optional für Persistence
+
