@@ -1,11 +1,6 @@
 use dashmap::DashMap;
 use rayon::prelude::*;
-use regex::Regex;
-use std::io::{BufRead, BufReader};
-use std::{
-    collections::{HashMap, HashSet},
-    fs::{self, File},
-};
+use std::{fs, path::PathBuf, sync::Arc};
 use walkdir::WalkDir;
 
 fn main() {
@@ -14,56 +9,85 @@ fn main() {
 
     let query = "Microsoft";
     if let Some(files) = index.get(&query.to_lowercase()) {
-        println!("Gefunden in:");
+        println!("Gefunden in {} Dateien:", files.len());
         for file in files.iter() {
             println!(" - {}", file);
         }
     } else {
-        print!("Nothing Found")
+        println!("Nothing Found")
     }
 }
 
-fn build_index(path: &str) -> DashMap<String, Vec<String>> {
-    let mut index: DashMap<String, Vec<String>> = DashMap::new();
-    let word_re = Regex::new(r"\w+").unwrap();
+fn build_index(path: &str) -> DashMap<String, Vec<Arc<String>>> {
+    let index: DashMap<String, Vec<Arc<String>>> = DashMap::new();
 
-    WalkDir::new(path)
+    let path_pool: DashMap<String, Arc<String>> = DashMap::new();
+
+    let files: Vec<PathBuf> = WalkDir::new(path)
         .into_iter()
         .filter_map(|e| e.ok())
-        .par_bridge()
-        .for_each(|entry| {
-            if entry.file_type().is_file() {
-                if let Some(ext) = entry.path().extension() {
-                    if ext != "txt" && ext != "rs" && ext != "md" {
-                        return;
-                    }
-                }
-                if let Ok(text) = fs::read_to_string(entry.path()) {
-                    let content = text.as_str().to_lowercase();
-                    let bytes = content.as_bytes();
-                    let mut i = 0;
+        .filter(|e| {
+            e.file_type().is_file()
+                && e.path()
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .map(|ext| matches!(ext, "txt" | "rs" | "md"))
+                    .unwrap_or(false)
+        })
+        .map(|e| e.path().to_path_buf())
+        .collect();
 
-                    while i < bytes.len() {
-                        if bytes[i].is_ascii_alphanumeric() {
-                            let start = i;
-                            while i < bytes.len() && bytes[i].is_ascii_alphanumeric() {
-                                i += 1;
-                            }
+    files.par_iter().with_min_len(4).for_each(|file_path| {
+        if let Ok(metadata) = fs::metadata(file_path) {
+            if metadata.len() > 10_000_000 {
+                println!("Überspringe große Datei: {}", file_path.display());
+                return;
+            }
+        }
 
-                            let word = &content[start..i];
-                            if word.len() >= 2 {
-                                index
-                                    .entry(word.to_string())
-                                    .or_insert_with(Vec::new)
-                                    .push(entry.path().display().to_string());
-                            }
-                        } else {
-                            i += 1;
-                        }
+        if let Ok(content) = fs::read_to_string(file_path) {
+            if content.len() > 5_000_000 {
+                return;
+            }
+
+            let content_lower = content.to_lowercase();
+            let bytes = content_lower.as_bytes();
+
+            let path_str = file_path.display().to_string();
+            let path_arc = path_pool
+                .entry(path_str.clone())
+                .or_insert_with(|| Arc::new(path_str))
+                .clone();
+
+            let mut seen_words = std::collections::HashSet::new();
+            let mut i = 0;
+
+            while i < bytes.len() {
+                if bytes[i].is_ascii_alphanumeric() {
+                    let start = i;
+                    while i < bytes.len() && bytes[i].is_ascii_alphanumeric() {
+                        i += 1;
                     }
+
+                    let word = &content_lower[start..i];
+                    // Wortlänge-Filter: min 3, max 50 Zeichen
+                    if word.len() >= 3 && word.len() <= 50 {
+                        seen_words.insert(word.to_string());
+                    }
+                } else {
+                    i += 1;
                 }
             }
-        });
 
+            for word in seen_words {
+                index
+                    .entry(word)
+                    .or_insert_with(Vec::new)
+                    .push(Arc::clone(&path_arc));
+            }
+        }
+    });
+
+    println!("Index enthält {} einzigartige Wörter", index.len());
     index
 }
