@@ -13,8 +13,6 @@ fn main() {
         for file in files.iter() {
             println!(" - {}", file);
         }
-    } else {
-        println!("Nothing Found")
     }
 }
 
@@ -40,7 +38,6 @@ fn build_index(path: &str) -> DashMap<String, Vec<Arc<String>>> {
     files.par_iter().with_min_len(4).for_each(|file_path| {
         if let Ok(metadata) = fs::metadata(file_path) {
             if metadata.len() > 10_000_000 {
-                println!("Überspringe große Datei: {}", file_path.display());
                 return;
             }
         }
@@ -70,7 +67,6 @@ fn build_index(path: &str) -> DashMap<String, Vec<Arc<String>>> {
                     }
 
                     let word = &content_lower[start..i];
-                    // Wortlänge-Filter: min 3, max 50 Zeichen
                     if word.len() >= 3 && word.len() <= 50 {
                         seen_words.insert(word.to_string());
                     }
@@ -88,6 +84,5 @@ fn build_index(path: &str) -> DashMap<String, Vec<Arc<String>>> {
         }
     });
 
-    println!("Index enthält {} einzigartige Wörter", index.len());
     index
 }
