@@ -1,3 +1,5 @@
+use dashmap::DashMap;
+use rayon::prelude::*;
 use regex::Regex;
 use std::io::{BufRead, BufReader};
 use std::{
@@ -7,13 +9,13 @@ use std::{
 use walkdir::WalkDir;
 
 fn main() {
-    let path = r"C:\Users\Henri";
+    let path = r"C:\Users\Henri\videos";
     let index = build_index(path);
 
-    let query = "rust";
+    let query = "Microsoft";
     if let Some(files) = index.get(&query.to_lowercase()) {
         println!("Gefunden in:");
-        for file in files {
+        for file in files.iter() {
             println!(" - {}", file);
         }
     } else {
@@ -21,32 +23,47 @@ fn main() {
     }
 }
 
-fn build_index(path: &str) -> HashMap<String, HashSet<String>> {
-    let mut index: HashMap<String, HashSet<String>> = HashMap::new();
+fn build_index(path: &str) -> DashMap<String, Vec<String>> {
+    let mut index: DashMap<String, Vec<String>> = DashMap::new();
     let word_re = Regex::new(r"\w+").unwrap();
 
-    for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
-        if entry.file_type().is_file() {
-            if let Some(ext) = entry.path().extension() {
-                if ext != "txt" && ext != "rs" && ext != "md" {
-                    continue;
+    WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .par_bridge()
+        .for_each(|entry| {
+            if entry.file_type().is_file() {
+                if let Some(ext) = entry.path().extension() {
+                    if ext != "txt" && ext != "rs" && ext != "md" {
+                        return;
+                    }
                 }
-            }
-            if let Ok(file) = File::open(entry.path()) {
-                let reader = BufReader::new(file);
-                for line_result in reader.lines() {
-                    if let Ok(line_text) = line_result {
-                        for word in word_re.find_iter(&line_text) {
-                            let w = word.as_str().to_lowercase();
-                            index
-                                .entry(w)
-                                .or_default()
-                                .insert(entry.path().display().to_string());
+                if let Ok(text) = fs::read_to_string(entry.path()) {
+                    let content = text.as_str().to_lowercase();
+                    let bytes = content.as_bytes();
+                    let mut i = 0;
+
+                    while i < bytes.len() {
+                        if bytes[i].is_ascii_alphanumeric() {
+                            let start = i;
+                            while i < bytes.len() && bytes[i].is_ascii_alphanumeric() {
+                                i += 1;
+                            }
+
+                            let word = &content[start..i];
+                            if word.len() >= 2 {
+                                index
+                                    .entry(word.to_string())
+                                    .or_insert_with(Vec::new)
+                                    .push(entry.path().display().to_string());
+                            }
+                        } else {
+                            i += 1;
                         }
                     }
                 }
             }
-        }
-    }
+        });
+
     index
 }
