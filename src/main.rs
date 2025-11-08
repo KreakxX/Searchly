@@ -1,7 +1,8 @@
 use regex::Regex;
+use std::io::{BufRead, BufReader};
 use std::{
     collections::{HashMap, HashSet},
-    fs,
+    fs::{self, File},
 };
 use walkdir::WalkDir;
 
@@ -31,13 +32,18 @@ fn build_index(path: &str) -> HashMap<String, HashSet<String>> {
                     continue;
                 }
             }
-            if let Ok(text) = fs::read_to_string(entry.path()) {
-                for word in word_re.find_iter(&text) {
-                    let w = word.as_str().to_lowercase();
-                    index
-                        .entry(w)
-                        .or_default()
-                        .insert(entry.path().display().to_string());
+            if let Ok(file) = File::open(entry.path()) {
+                let reader = BufReader::new(file);
+                for line_result in reader.lines() {
+                    if let Ok(line_text) = line_result {
+                        for word in word_re.find_iter(&line_text) {
+                            let w = word.as_str().to_lowercase();
+                            index
+                                .entry(w)
+                                .or_default()
+                                .insert(entry.path().display().to_string());
+                        }
+                    }
                 }
             }
         }
